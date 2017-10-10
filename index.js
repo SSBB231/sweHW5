@@ -38,6 +38,7 @@ let loadFromFireBase = true;
 //End of Global Functions=====================================
 
 //Class Declarations==========================================
+
 class User
 {
     constructor(uName, uEmail)
@@ -45,6 +46,7 @@ class User
         this.username = uName;
         this.email = uEmail;
         this.friendUIDS = new Set();
+        this.appointments = new Map();
     }
 
     getEmail()
@@ -90,6 +92,33 @@ class User
         return this.friendUIDS;
     }
 
+    addAppointment(appointment)
+    {
+        // this.getAppointment(appointment.getDate())
+        //     .then((retrieved)=>
+        //     {
+        //         if(force)
+        //         {
+        //             this.appointments.set(appointment.getDate(), appointment);
+        //         }
+        //         else
+        //         {
+        //             res.send("Appointment Already Alotted for That Time");
+        //         }
+        //     })
+        //     .catch((message)=>
+        //     {
+        //         this.appointments.set(appointment.getDate(), appointment);
+        //     })
+
+        this.appointments.set(appointment.getDate(), appointment);
+    }
+
+    getAppointments()
+    {
+        return this.appointments;
+    }
+
     toString()
     {
         let retval = `${this.username}\n${this.email}\n`;
@@ -98,6 +127,24 @@ class User
             retval+=friend+"\n";
         }
         return retval;
+    }
+
+
+    getAppointment(date)
+    {
+        return new Promise((resolve, reject)=>
+        {
+            let retrieved = this.appointments.get(date);
+
+            if(retrieved === undefined)
+            {
+                reject("Appointment Not Yet Created");
+            }
+            else
+            {
+                resolve(retrieved);
+            }
+        });
     }
 }
 
@@ -165,7 +212,40 @@ class Appointment
     {
         return this.date.getHour();
     }
+
 }
+
+router.route('/users/:userID/appointments/')
+    .post((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                user.getAppointment(req.body.date, forced)
+                    .then((appointment)=>
+                    {
+                        if(forced)
+                        {
+                            let newAppointment = new Appointment(req.body.place, req.body.parties, req.body.date, req.body.description);
+                            user.addAppointment(newAppointment);
+                        }
+                        else
+                        {
+                            res.send("Cannot POST Appointment. Time Slot Already Taken.");
+                        }
+                    })
+                    .catch((error)=>
+                    {
+                        let newAppointment = new Appointment(req.body.place, req.body.parties, req.body.date, req.body.description);
+                        user.addAppointment(newAppointment);
+                        res.send(error+"\nCreating New Appointment.";)
+                    });
+            })
+            .catch((message)=>
+            {
+                res.send(message);
+            });
+    });
 
 router.route('/users/')
     .get((req, res)=>
@@ -211,8 +291,8 @@ router.route('/users/:userID/')
 //============================== End of Simple Routing and Deleting ==============================
 
 //============================== Routing with UserID and Email ===================================
-router.route('/users/:userID')
-    .put(jsonParser, (req, res)=>
+router.route('/users/:userID/email')
+    .put((req, res)=>
     {
         getUserFromMap(req.params.userID)
             .then((retrieved)=>
@@ -225,8 +305,10 @@ router.route('/users/:userID')
             {
                 res.send(error);
             });
-    })
-    .post(jsonParser, (req, res)=>
+    });
+
+router.route('/users/:userID/')
+    .post((req, res)=>
     {
         getUserFromMap(req.params.userID)
             .then((retrieved)=>
@@ -345,6 +427,27 @@ function getUserFromMap(userID)
     });
 }
 
+function downloadFriends(user)
+{
+    let freindsRef = database.ref('friends').child(user.getUserName());
+
+    freindsRef.once('value')
+        .then((snapshot)=>
+        {
+            let friends = snapshot.val();
+
+            if(friends !== null)
+            {
+                // console.log("These are the friends I downloaded: " + friends);
+                for(let i in friends)
+                {
+                    // console.log("Friend: " + friends[i]);
+                    user.addFriendID(friends[i]);
+                }
+            }
+        });
+}
+
 function downloadDataFromFireBase()
 {
     let reference = database.ref('users/');
@@ -352,15 +455,17 @@ function downloadDataFromFireBase()
         .then((snapshot)=>
         {
             let data = snapshot.val();
-            console.log(data);
+            //console.log(data);
             users = new Map();
 
             let user;
             for(let element in data)
             {
                 user = data[element];
-                console.log(user);
-                users.set(user.username, new User(user.username, user.email));
+                let newUser = new User(user.username, user.email);
+                downloadFriends(newUser);
+                //console.log(user);
+                users.set(user.username, newUser);
             }
         })
         .catch((error)=>
@@ -396,17 +501,20 @@ function saveUserToDatabase(data)
     database.ref('users/' + data.getUserName()).set(data);
     //this part isn't working. Set is somehow not put into the tree.
     addFriendListToDatabase(data);
-
 }
 
 function addFriendListToDatabase(data)
 {
-    database.ref('friends/'+data.getUserName()).delete();
+    let node = database.ref().child('friends').child(data.getUserName());
+    node.remove();
 
     for(let friend of data.getFriendUIDS())
     {
-        database.ref('friends/'+data.getUserName()).push(friend);
+        console.log("RETRIEVED THIS INFO: " + friend);
+        database.ref().child('friends').child(data.getUserName()).push(friend);
     }
+
+    console.log("Added all friends==================");
 }
 
 function deleteUserFromDatabase(user)
