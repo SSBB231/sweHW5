@@ -111,7 +111,9 @@ class User
         //         this.appointments.set(appointment.getDate(), appointment);
         //     })
 
-        this.appointments.set(appointment.getDate(), appointment);
+        let aString = appointment.getDate().toString();
+        console.log(aString);
+        this.appointments.set(aString, appointment);
     }
 
     getAppointments()
@@ -134,6 +136,7 @@ class User
     {
         return new Promise((resolve, reject)=>
         {
+            console.log("Getting: " + date);
             let retrieved = this.appointments.get(date);
 
             if(retrieved === undefined)
@@ -150,12 +153,25 @@ class User
 
 class Appointment
 {
-    constructor(place, parties, date, description)
+    constructor(user, place, parties, date, description)
     {
         this.place = place;
-        this.parties = parties;
+
+        for(let party of parties)
+        {
+            this.addParty(user, party);
+        }
+
         this.date = date;
         this.description = description;
+    }
+
+    addParty(user, friendID)
+    {
+        if(user.isFriend(friendID))
+        {
+            this.parties.push(friendID);
+        }
     }
 
     getPlace()
@@ -221,29 +237,24 @@ router.route('/users/:userID/appointments/')
         getUserFromMap(req.params.userID)
             .then((user)=>
             {
-                user.getAppointment(req.body.date, forced)
+                let newDate = new Date(req.body.date);
+                user.getAppointment(newDate.toString())
                     .then((appointment)=>
                     {
-                        if(forced)
-                        {
-                            let newAppointment = new Appointment(req.body.place, req.body.parties, req.body.date, req.body.description);
-                            user.addAppointment(newAppointment);
-                        }
-                        else
-                        {
-                            res.send("Cannot POST Appointment. Time Slot Already Taken.");
-                        }
+                        // let newAppointment = new Appointment(user, req.body.place, req.body.parties, newDate, req.body.description);
+                        // user.addAppointment(newAppointment);
+                        res.send("Cannot Create Appointment. Time Slot Already Taken.");
                     })
                     .catch((error)=>
                     {
-                        let newAppointment = new Appointment(req.body.place, req.body.parties, req.body.date, req.body.description);
+                        let newAppointment = new Appointment(user, req.body.place, req.body.parties, newDate, req.body.description);
                         user.addAppointment(newAppointment);
-                        res.send(error+"\nCreating New Appointment.";)
+                        res.send(error+"\nCreating New Appointment.");
                     });
             })
             .catch((message)=>
             {
-                res.send(message);
+                res.send("USER DOES NOT EXIST"+message);
             });
     });
 
@@ -512,6 +523,20 @@ function addFriendListToDatabase(data)
     {
         console.log("RETRIEVED THIS INFO: " + friend);
         database.ref().child('friends').child(data.getUserName()).push(friend);
+    }
+
+    console.log("Added all friends==================");
+}
+
+function uploadUserAppointments(user, appointment)
+{
+    let node = database.ref().child('appointments').child(user.getUserName());
+    node.remove();
+
+    for(let friend of appointment.getParties())
+    {
+        console.log("RETRIEVED THIS INFO: " + friend);
+        database.ref().child('appointments').child(user.getUserName()).push(friend);
     }
 
     console.log("Added all friends==================");
