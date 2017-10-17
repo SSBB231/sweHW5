@@ -1,3 +1,6 @@
+//1080437453033-f5i9agarlv6j82sdq6bqnavermq2stva.apps.googleusercontent.com
+
+
 //App Globals=================================================
 
 const express = require('express');
@@ -7,6 +10,138 @@ var router = express.Router();
 const port = process.env.PORT || 5000;
 const bodyParser = require('body-parser');
 const jsonParser = bodyParser.json();
+
+//====================================== Google APIs====================================================================
+var fs = require('fs');
+var readline = require('readline');
+var google = require('googleapis');
+var googleAuth = require('google-auth-library');
+
+// If modifying these scopes, delete your previously saved credentials
+// at ~/.credentials/calendar-nodejs-quickstart.json
+var SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+var TOKEN_DIR = (process.env.HOME || process.env.HOMEPATH ||
+    process.env.USERPROFILE) + '/.credentials/';
+var TOKEN_PATH = TOKEN_DIR + 'calendar-nodejs-quickstart.json';
+
+// Load client secrets from a local file.
+fs.readFile('client_secret.json', function processClientSecrets(err, content) {
+    if (err) {
+        console.log('Error loading client secret file: ' + err);
+        return;
+    }
+    // Authorize a client with the loaded credentials, then call the
+    // Google Calendar API.
+    authorize(JSON.parse(content), listEvents);
+});
+
+/**
+ * Create an OAuth2 client with the given credentials, and then execute the
+ * given callback function.
+ *
+ * @param {Object} credentials The authorization client credentials.
+ * @param {function} callback The callback to call with the authorized client.
+ */
+function authorize(credentials, callback) {
+    var clientSecret = credentials.installed.client_secret;
+    var clientId = credentials.installed.client_id;
+    var redirectUrl = credentials.installed.redirect_uris[0];
+    var auth = new googleAuth();
+    var oauth2Client = new auth.OAuth2(clientId, clientSecret, redirectUrl);
+
+    // Check if we have previously stored a token.
+    fs.readFile(TOKEN_PATH, function(err, token) {
+        if (err) {
+            getNewToken(oauth2Client, callback);
+        } else {
+            oauth2Client.credentials = JSON.parse(token);
+            callback(oauth2Client);
+        }
+    });
+}
+
+/**
+ * Get and store new token after prompting for user authorization, and then
+ * execute the given callback with the authorized OAuth2 client.
+ *
+ * @param {google.auth.OAuth2} oauth2Client The OAuth2 client to get token for.
+ * @param {getEventsCallback} callback The callback to call with the authorized
+ *     client.
+ */
+function getNewToken(oauth2Client, callback) {
+    var authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: SCOPES
+    });
+    console.log('Authorize this app by visiting this url: ', authUrl);
+    var rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    rl.question('Enter the code from that page here: ', function(code) {
+        rl.close();
+        oauth2Client.getToken(code, function(err, token) {
+            if (err) {
+                console.log('Error while trying to retrieve access token', err);
+                return;
+            }
+            oauth2Client.credentials = token;
+            storeToken(token);
+            callback(oauth2Client);
+        });
+    });
+}
+
+/**
+ * Store token to disk be used in later program executions.
+ *
+ * @param {Object} token The token to store to disk.
+ */
+function storeToken(token) {
+    try {
+        fs.mkdirSync(TOKEN_DIR);
+    } catch (err) {
+        if (err.code != 'EEXIST') {
+            throw err;
+        }
+    }
+    fs.writeFile(TOKEN_PATH, JSON.stringify(token));
+    console.log('Token stored to ' + TOKEN_PATH);
+}
+
+/**
+ * Lists the next 10 events on the user's primary calendar.
+ *
+ * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
+ */
+function listEvents(auth) {
+    var calendar = google.calendar('v3');
+    calendar.events.list({
+        auth: auth,
+        calendarId: 'primary',
+        timeMin: (new Date()).toISOString(),
+        maxResults: 10,
+        singleEvents: true,
+        orderBy: 'startTime'
+    }, function(err, response) {
+        if (err) {
+            console.log('The API returned an error: ' + err);
+            return;
+        }
+        var events = response.items;
+        if (events.length == 0) {
+            console.log('No upcoming events found.');
+        } else {
+            console.log('Upcoming 10 events:');
+            for (var i = 0; i < events.length; i++) {
+                var event = events[i];
+                var start = event.start.dateTime || event.start.date;
+                console.log('%s - %s', start, event.summary);
+            }
+        }
+    });
+}
+//======================================================================================================================
 
 //Firebase
 let firebase = require("firebase");
@@ -149,21 +284,48 @@ class User
             }
         });
     }
+
+    getAllAppointments()
+    {
+        return this.appointments.values();
+    }
 }
 
 class Appointment
 {
-    constructor(user, place, parties, date, description)
+    constructor(user, place, parties, startDate, endDate, description)
     {
         this.place = place;
+
+        this.startDate = startDate;
+        this.endDate = endDate;
 
         for(let party of parties)
         {
             this.addParty(user, party);
         }
 
-        this.date = date;
         this.description = description;
+    }
+
+    getStartDate()
+    {
+        return this.startDate;
+    }
+
+    getEndDate()
+    {
+        return this.endDate;
+    }
+
+    setStartDate(date)
+    {
+        this.startDate = date;
+    }
+
+    setEndDate(date)
+    {
+        this.endDate = date;
     }
 
     addParty(user, friendID)
@@ -196,7 +358,7 @@ class Appointment
 
     getDate()
     {
-        return this.date;
+        return this.getStartDate();
     }
 
     setDate(value)
@@ -216,40 +378,196 @@ class Appointment
 
     getMonth()
     {
-        return this.date.getMonth();
+        return this.startDate.getUTCMonth();
     }
 
     getYear()
     {
-        return this.date.getFullYear();
+        return this.startDate.getUTCFullYear();
     }
 
     getHour()
     {
-        return this.date.getHour();
+        return this.startDate.getHour();
+    }
+
+    toString()
+    {
+        return this.startDate.toString() + "=>" + this.endDate.toString();
     }
 
 }
 
+function appointmentsOverlap(start1, end1, start2, end2)
+{
+    let s1 = start1.getTime();
+    let e1 = end1.getTime();
+    let s2 = start2.getTime();
+    let e2 = end2.getTime();
+
+    if(s1 < e2 || s2 < e1)
+        return true;
+    else
+        return false;
+}
+
+router.route('/users/:userID/appointments/:month')
+    .get((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                let string = "";
+                for(let appointment of user.getAllAppointments())
+                {
+                    if(appointment.getMonth() == (req.params.month-1))
+                        string += appointment.toString()+"\n";
+                    else
+                        string += "Not IN MONTH"+"\n";
+                }
+
+                res.send(string);
+            })
+            .catch((message)=>
+            {
+                res.send("USER DOES NOT EXIST"+message);
+            });
+    });
+
+function getThisMonths(user)
+{
+    return new Promise((resolve, reject)=>
+    {
+        let today = new Date();
+        let string = "Today's month is: " + today.getUTCMonth() + "\nAppointments:\n";
+
+        for(let appointment of user.getAllAppointments())
+        {
+            if(appointment.getMonth() == (today.getUTCMonth()))
+                string += appointment.toString()+"\n";
+            else
+                string += "Not IN MONTH"+"\n";
+        }
+
+        if(!string.includes("Today's month is"))
+        {
+            reject("String Was Not Completed");
+        }
+        else
+        {
+            resolve(string);
+        }
+    });
+}
+
+router.route('/users/:userID/this_month/')
+    .get((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                getThisMonths(user)
+                    .then((string)=>
+                    {
+                        res.send(string);
+                    })
+                    .catch((error)=>{res.send(""+error)});
+            })
+            .catch((message)=>
+            {
+                res.send("USER DOES NOT EXIST"+message);
+            });
+    });
+
 router.route('/users/:userID/appointments/')
+    .get((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                let string = "";
+                for(let appointment of user.getAllAppointments())
+                {
+                    string += appointment.toString()+"\n";
+                }
+
+                res.send(string);
+            })
+            .catch((message)=>
+            {
+                res.send("USER DOES NOT EXIST"+message);
+            });
+    })
     .post((req, res)=>
     {
         getUserFromMap(req.params.userID)
             .then((user)=>
             {
-                let newDate = new Date(req.body.date);
-                user.getAppointment(newDate.toString())
+                let sDate = new Date(req.body.startDate);
+                let eDate = new Date(req.body.endDate);
+                user.getAppointment(sDate.toString())
                     .then((appointment)=>
                     {
-                        // let newAppointment = new Appointment(user, req.body.place, req.body.parties, newDate, req.body.description);
+                        let newAppointment = new Appointment(user, req.body.place, req.body.parties, sDate, eDate, req.body.description);
                         // user.addAppointment(newAppointment);
-                        res.send("Cannot Create Appointment. Time Slot Already Taken.");
+
+                        //Check whether appointments span same hours.
+                        if(appointmentsOverlap(sDate, eDate, appointment.getStartDate(), appointment.getEndDate()))
+                            res.send("Cannot Create Appointment. Time Slot Already Taken.");
+                        else
+                            user.addAppointment(newAppointment);
                     })
                     .catch((error)=>
                     {
-                        let newAppointment = new Appointment(user, req.body.place, req.body.parties, newDate, req.body.description);
+                        let newAppointment = new Appointment(user, req.body.place, req.body.parties, sDate, eDate, req.body.description);
                         user.addAppointment(newAppointment);
                         res.send(error+"\nCreating New Appointment.");
+                    });
+            })
+            .catch((message)=>
+            {
+                res.send("USER DOES NOT EXIST"+message);
+            });
+    })
+    .put((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                let sDate = new Date(req.body.startDate);
+                let eDate = new Date(req.body.endDate);
+                user.getAppointment(sDate.toString())
+                    .then((appointment)=>
+                    {
+                        let newAppointment = new Appointment(user, req.body.place, req.body.parties, sDate, eDate, req.body.description);
+                        user.addAppointment(newAppointment);
+                        res.send("Changes to Appointment Successfully Saved.");
+                    })
+                    .catch((error)=>
+                    {
+                        res.send("Appointment Does Not Exist. You May POST a New Appointment if You Wish.");
+                    });
+            })
+            .catch((message)=>
+            {
+                res.send("USER DOES NOT EXIST"+message);
+            });
+    })
+    .delete((req, res)=>
+    {
+        getUserFromMap(req.params.userID)
+            .then((user)=>
+            {
+                let sDate = new Date(req.body.startDate);
+                user.getAppointment(sDate.toString())
+                    .then((appointment)=>
+                    {
+                        user.removeAppointment();
+                        res.send("Appointment Successfully Removed.");
+                    })
+                    .catch((error)=>
+                    {
+                        res.send("Cannot Remove Unexistent Appointment.");
                     });
             })
             .catch((message)=>

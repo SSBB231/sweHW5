@@ -1,0 +1,17 @@
+{
+	"user":"ssbb300",
+	"place":"Hawaii",
+	"parties":"{monica, ssbb300, peter}",
+	"startDate":"2017-10-16",
+	"endDate":"2017-10-18",
+	"description":"meetings"
+}
+
+{
+	"user":"eric",
+	"place":"Hawaii",
+	"parties":"{monica, ssbb300, peter}",
+	"startDate":"2017-10-17",
+	"endDate":"2017-10-17",
+	"description":"birthday"
+}
